@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="https://cdn1.site-media.eu/images/0/11703058/Favicon.png" type="image/x-icon">
+    <title>Generador de Orden de Compra</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Styles for PDF page container, applied by JS for html2canvas rendering */
+        .pdf-page-container {
+            width: 297mm; /* A4 landscape width */
+            height: 210mm; /* A4 landscape height */
+            padding: 15mm; /* Consistent with JS MARGIN_MM */
+            box-sizing: border-box; /* Padding is inside width/height */
+            background-color: white;
+            display: flex;
+            flex-direction: column;
+            overflow: visible; /* Allows content to be fully captured if slightly overflowing calculated boundaries */
+        }
+
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .no-print {
+                display: none !important;
+            }
+            /* Styles for direct printing (Ctrl+P), .pdf-page-container defined globally now */
+        }
+
+        [contenteditable="true"]:focus {
+            outline: 1px dashed #3b82f6; /* Tailwind blue-500 */
+            background-color: #eff6ff; /* Tailwind blue-50 */
+        }
+        [contenteditable="true"] {
+            padding: 2px 4px;
+            border-radius: 0.25rem;
+        }
+        .editable-table-cell {
+            padding: 0.5rem;
+        }
+        .items-table th, .items-table td {
+            border: 1px solid #e5e7eb; /* Tailwind gray-200 */
+            padding: 0.5rem;
+            text-align: left;
+        }
+        .items-table th {
+            background-color: #1f2937; /* Tailwind gray-800 */
+            color: white;
+            font-size: 0.75rem; /* text-xs */
+        }
+        .items-table td {
+            font-size: 0.875rem; /* text-sm */
+        }
+        .totals-table td {
+            padding: 0.25rem 0.5rem;
+        }
+        .a4-landscape-preview { /* For on-screen preview */
+            width: 297mm;
+            min-height: 210mm; 
+            padding: 15mm; 
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            margin: 20px auto;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            display: flex; /* Added to match pdf-page-container structure */
+            flex-direction: column; /* Added to match pdf-page-container structure */
+        }
+        .offscreen-render-area { /* For measurements and temporary rendering */
+            position: absolute;
+            left: -9999px;
+            top: -9999px;
+            width: 297mm; 
+            padding: 15mm; 
+            box-sizing: border-box; 
+            background-color: white;
+        }
+        .custom-file-upload {
+            border: 1px solid #ccc;
+            display: inline-block;
+            padding: 6px 12px;
+            cursor: pointer;
+            background-color: #f8f9fa;
+            border-radius: 0.375rem; /* rounded-md */
+        }
+        .custom-file-upload:hover {
+            background-color: #e9ecef;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100 p-4 sm:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6 no-print">
+            <h1 class="text-2xl font-bold text-gray-700 mb-4">Generador de Orden de Compra V. 1.0.0.</h1>
+            <h3 class="mb-4 mt-1">Creado por Carlos Marin Aquino </h3>
+            <div class="flex space-x-2 mb-4">
+                <button id="exportPdfButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out">
+                    Exportar a PDF
+                </button>
+                <button id="exportJsonButton" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out">
+                    Exportar a JSON
+                </button>
+                <label for="importJsonInput" class="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out cursor-pointer">
+                    Importar JSON
+                </label>
+                <input type="file" id="importJsonInput" class="hidden" accept=".json">
+            </div>
+            <p class="text-sm text-gray-600 mt-2">Asegúrate de que todos los campos estén completos y correctos antes de exportar.</p>
+            <div id="pdf-progress" class="text-sm text-blue-600 mt-2 no-print" style="display: none;">Generando PDF...</div>
+            <div id="json-message" class="text-sm text-green-600 mt-2 no-print" style="display: none;"></div>
+        </div>
+
+        <div id="purchaseOrderMasterContainer" class="a4-landscape-preview">
+            <header class="flex justify-between items-start mb-4 text-xs">
+                <div class="w-2/3">
+                    <h1 class="text-2xl font-bold text-gray-800" contenteditable="true" id="empresaNombre">Modelos Animales y Servicios S.A. de C.V.</h1>
+                    <p contenteditable="true" id="empresaDireccion1">Boulevard Adolfo López Mateos Número 2235, quinto piso,</p>
+                    <p contenteditable="true" id="empresaDireccion2">Colonia Las Águilas, Alcaldía Álvaro Obregón, 01710 Ciudad de México.</p>
+                    <p><strong class="font-semibold">RFC:</strong> <span contenteditable="true" id="empresaRfc">MAS190523PN6</span></p>
+                    <p><strong class="font-semibold">Tel:</strong> <span contenteditable="true" id="empresaTel">55 5409 9941</span></p>
+                </div>
+                <div class="w-1/3 text-right space-y-1">
+                    <p><strong class="font-semibold">FECHA:</strong> <span contenteditable="true" id="fecha">06/05/2025</span></p>
+                    <p><strong class="font-semibold">ORDEN DE COMPRA:</strong> <span contenteditable="true" id="ordenCompraNo" class="text-red-800">25101</span></p>
+                    <p><strong class="font-semibold">COTIZACIÓN:</strong> <span contenteditable="true" id="cotizacionNo">101176510v1</span></p>
+                    <p><strong class="font-semibold">REQUISICIÓN:</strong> <span contenteditable="true" id="requisicionNo" class="text-red-800">OP-25500</span></p>
+                    <p><strong class="font-semibold">TIPO DE CAMBIO:</strong> <span contenteditable="true" id="tipoCambio">Pesos MXN</span></p>
+                    <p><strong class="font-semibold">Versión:</strong> <span contenteditable="true" id="headerRevDate" class="text-red-800">V.1</span></p>
+                </div>
+            </header>
+            <div class="text-center my-4">
+                <h2 class="text-xl font-bold border-b-2 border-gray-300 pb-1 inline-block">ORDEN DE COMPRA</h2>
+            </div>
+
+            <section class="grid grid-cols-2 gap-4 mb-4 text-xs" id="providerDeliverySection">
+                <div class="border border-gray-300 p-3 rounded-md bg-gray-50">
+                    <h3 class="font-bold text-sm mb-1 text-gray-700">PROVEEDOR</h3>
+                    <p contenteditable="true" class="font-semibold" id="proveedorNombre">Modifique por favor</p>
+                    <p contenteditable="true" id="proveedorDireccion1">Modifique por favor</p>
+                    <p contenteditable="true" id="proveedorDireccion2">Modifique por favor</p>
+                    <p><strong class="font-semibold">RFC:</strong> <span contenteditable="true" id="proveedorRfc">Modifique por favor</span></p>
+                    <p><strong class="font-semibold">Contacto:</strong> <span contenteditable="true" id="proveedorContacto">Modifique por favor</span></p>
+                </div>
+                <div class="border border-gray-300 p-3 rounded-md bg-gray-50">
+                    <h3 class="font-bold text-sm mb-1 text-gray-700">ENTREGAR EN:</h3>
+                    <p contenteditable="true" class="font-semibold" id="entregaNombre">Edificio H, Mario Molina, Circuito Mario de la Cueva S/N</p>
+                    <p contenteditable="true" id="entregaDireccion1">3er piso Unidad de Vinculación de la Quimica, Coyoacán, C.U., 04510</p>
+                    <p contenteditable="true" id="entregaDireccion2">Ciudad de México, CDMX</p>
+                    <p><strong class="font-semibold">RFC:</strong> <span contenteditable="true" id="entregaRfc">MAS190523PN6</span></p>
+                    <p><strong class="font-semibold">Tel:</strong> <span contenteditable="true" id="entregaTel">55 4237 2826 y 55 5409 9941</span></p>
+                </div>
+            </section>
+
+            <section class="mb-4 flex-grow" id="itemsSection"> 
+                <table class="w-full items-table">
+                    <thead>
+                        <tr>
+                            <th class="w-1/12">PARTIDA</th>
+                            <th class="w-4/12">DESCRIPCIÓN</th>
+                            <th class="w-2/12">MARCA</th>
+                            <th class="w-2/12">NO. PARTE</th>
+                            <th class="w-1/12 text-right">CANTIDAD</th>
+                            <th class="w-1/12 text-right">PRECIO</th>
+                            <th class="w-1/12 text-right">DESCUENTO (%)</th>
+                            <th class="w-1/12 text-right">IMPORTE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="itemsTableBody">
+                        <tr class="item-row">
+                            <td contenteditable="true" class="editable-table-cell partida-numero">1</td>
+                            <td contenteditable="true" class="editable-table-cell item-descripcion">Modifique por favor</td>
+                            <td contenteditable="true" class="editable-table-cell item-marca">Modifique por favor</td>
+                            <td contenteditable="true" class="editable-table-cell item-no-parte">Modifique por favor</td>
+                            <td contenteditable="true" class="editable-table-cell text-right item-cantidad">0</td>
+                            <td contenteditable="true" class="editable-table-cell text-right item-precio">0</td>
+                            <td contenteditable="true" class="editable-table-cell text-right item-descuento">0</td>
+                            <td class="text-right item-importe">0.00</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <button id="addItemButton" class="mt-2 bg-green-500 hover:bg-green-600 text-white font-bold py-1 px-3 rounded-md text-sm no-print shadow transition duration-150 ease-in-out">
+                    + Agregar Partida
+                </button>
+            </section>
+
+            <section class="flex justify-end mb-4 text-xs totals-table" id="totalsSection">
+                <div class="w-1/3">
+                    <table class="w-full">
+                        <tbody>
+                            <tr>
+                                <td class="font-semibold text-gray-600">SUBTOTAL:</td>
+                                <td class="text-right font-semibold" id="subtotal">$ 0.00</td>
+                            </tr>
+                            <tr>
+                                <td class="font-semibold text-gray-600">
+                                    IVA (<input type="number" id="ivaPorcentaje" value="16" class="w-10 text-right border rounded px-1 py-0.5 text-xs focus:outline-blue-500 no-print"> %):
+                                    <span class="print-only-iva-percentage">16</span> </td>
+                                <td class="text-right font-semibold" id="ivaMonto">$ 0.00</td>
+                            </tr>
+                            <tr class="border-t-2 border-gray-400">
+                                <td class="font-bold text-sm text-gray-800 pt-1">TOTAL:</td>
+                                <td class="text-right font-bold text-sm text-gray-800 pt-1" id="totalGeneral">$ 0.00</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            
+            <footer class="text-xs border-t pt-3 mt-auto" id="footerSection"> 
+                <div class="mb-2">
+                    <strong class="font-semibold">SOLICITANTE:</strong>
+                    <span contenteditable="true" id="solicitante" class="ml-2 p-1 border-b border-dotted border-gray-400">Modifique por favor</span>
+                </div>
+                <p class="text-gray-600 mb-1" contenteditable="true" id="footerNota1">NO SE RECIBE PRODUCTO SI: NO CUENTA CON ORDEN DE COMPRA Y FACTURA. SI PRESENTA DATOS INCORRECTOS RESPECTO A LO SOLICITADO EN LA ORDEN.</p>
+                <p class="text-gray-600 mb-3" contenteditable="true" id="footerNota2">LAS ENTREGAS SE RECIBEN EN UN HORARIO DE 10:00 A.M. A 16:00 P.M.</p>
+                <div class="flex justify-between items-center text-gray-500">
+                    <p> <span contenteditable="true" id="footerRevDate"></span></p>
+                    <p id="pageNumberDisplay">Página 1 de 1</p>
+                </div>
+            </footer>
+        </div>
+    </div>
+    
+    <div id="pdfRenderArea" class="offscreen-render-area"></div>
+
+    <script>
+        const { jsPDF } = window.jspdf;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const itemsTableBody = document.getElementById('itemsTableBody');
+            const addItemButton = document.getElementById('addItemButton');
+            const ivaPorcentajeInput = document.getElementById('ivaPorcentaje');
+            const exportPdfButton = document.getElementById('exportPdfButton');
+            const exportJsonButton = document.getElementById('exportJsonButton');
+            const importJsonInput = document.getElementById('importJsonInput');
+            const purchaseOrderMasterContainer = document.getElementById('purchaseOrderMasterContainer');
+            const pdfRenderArea = document.getElementById('pdfRenderArea');
+            const pdfProgress = document.getElementById('pdf-progress');
+            const jsonMessage = document.getElementById('json-message');
+
+            function showJsonMessage(message, isError = false) {
+                jsonMessage.textContent = message;
+                jsonMessage.style.color = isError ? 'red' : 'green';
+                jsonMessage.style.display = 'block';
+                setTimeout(() => {
+                    jsonMessage.style.display = 'none';
+                }, 3000);
+            }
+
+            function formatNumber(num) {
+                if (isNaN(parseFloat(num))) return '0.00';
+                let number = parseFloat(num);
+                let parts = number.toFixed(2).toString().split('.');
+                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return parts.join('.');
+            }
+
+            function updatePartidaNumbers() {
+                const rows = itemsTableBody.querySelectorAll('.item-row');
+                rows.forEach((row, index) => {
+                    const partidaCell = row.querySelector('.partida-numero');
+                    if (partidaCell) partidaCell.textContent = index + 1;
+                });
+            }
+
+            function parseEditableFloat(element) {
+                if (!element || !element.textContent) return 0;
+                const textValue = element.textContent.replace(/,/g, ''); // Remove commas for parsing
+                return parseFloat(textValue) || 0;
+            }
+
+            function calculateRowTotals(row) {
+                const cantidadEl = row.querySelector('.item-cantidad');
+                const precioEl = row.querySelector('.item-precio');
+                const descuentoEl = row.querySelector('.item-descuento');
+                const importeEl = row.querySelector('.item-importe');
+
+                const cantidad = parseEditableFloat(cantidadEl);
+                const precio = parseEditableFloat(precioEl);
+                const descuentoPercent = parseEditableFloat(descuentoEl);
+
+                const importeBruto = cantidad * precio;
+                const descuentoMonto = importeBruto * (descuentoPercent / 100);
+                const importeNeto = importeBruto - descuentoMonto;
+                
+                if (importeEl) importeEl.textContent = formatNumber(importeNeto);
+                return importeNeto;
+            }
+            
+            function calculateGlobalTotals() {
+                let subtotal = 0;
+                const itemRows = itemsTableBody.querySelectorAll('.item-row');
+                itemRows.forEach(row => {
+                    subtotal += calculateRowTotals(row);
+                });
+
+                document.getElementById('subtotal').textContent = `$ ${formatNumber(subtotal)}`;
+                const ivaPorcentaje = parseFloat(ivaPorcentajeInput.value) || 0;
+                const printIvaSpan = purchaseOrderMasterContainer.querySelector('.print-only-iva-percentage');
+                if(printIvaSpan) printIvaSpan.textContent = ivaPorcentaje;
+
+                const ivaMonto = subtotal * (ivaPorcentaje / 100);
+                document.getElementById('ivaMonto').textContent = `$ ${formatNumber(ivaMonto)}`;
+                const totalGeneral = subtotal + ivaMonto;
+                document.getElementById('totalGeneral').textContent = `$ ${formatNumber(totalGeneral)}`;
+            }
+
+            function addItemRowListeners(row) {
+                 row.querySelectorAll('.item-cantidad, .item-precio, .item-descuento').forEach(el => {
+                    el.addEventListener('input', () => {
+                        calculateRowTotals(row); 
+                        calculateGlobalTotals(); 
+                    });
+                });
+            }
+            
+            itemsTableBody.querySelectorAll('.item-row').forEach(addItemRowListeners);
+            ivaPorcentajeInput.addEventListener('input', calculateGlobalTotals);
+
+            function createItemRowElement(itemData = {}) {
+                const newRow = document.createElement('tr');
+                newRow.classList.add('item-row');
+                const partida = itemData.partida || (itemsTableBody.querySelectorAll('.item-row').length + 1);
+                newRow.innerHTML = `
+                    <td contenteditable="true" class="editable-table-cell partida-numero">${partida}</td>
+                    <td contenteditable="true" class="editable-table-cell item-descripcion">${itemData.descripcion || 'Nueva descripción'}</td>
+                    <td contenteditable="true" class="editable-table-cell item-marca">${itemData.marca || 'Marca'}</td>
+                    <td contenteditable="true" class="editable-table-cell item-no-parte">${itemData.noParte || 'No. Parte'}</td>
+                    <td contenteditable="true" class="editable-table-cell text-right item-cantidad">${itemData.cantidad || '1'}</td>
+                    <td contenteditable="true" class="editable-table-cell text-right item-precio">${formatNumber(itemData.precio) || '0.00'}</td>
+                    <td contenteditable="true" class="editable-table-cell text-right item-descuento">${itemData.descuento || '0'}</td>
+                    <td class="text-right item-importe">${formatNumber(itemData.importe) || '0.00'}</td> 
+                `;
+                addItemRowListeners(newRow);
+                return newRow;
+            }
+
+            addItemButton.addEventListener('click', function () {
+                const newRow = createItemRowElement();
+                itemsTableBody.appendChild(newRow);
+                calculateGlobalTotals(); 
+                updatePartidaNumbers(); 
+            });
+            
+            updatePartidaNumbers(); 
+            calculateGlobalTotals();
+
+            // --- JSON Export/Import ---
+            function gatherDataForJson() {
+                const data = {
+                    empresaNombre: document.getElementById('empresaNombre')?.textContent,
+                    empresaDireccion1: document.getElementById('empresaDireccion1')?.textContent,
+                    empresaDireccion2: document.getElementById('empresaDireccion2')?.textContent,
+                    empresaRfc: document.getElementById('empresaRfc')?.textContent,
+                    empresaTel: document.getElementById('empresaTel')?.textContent,
+                    fecha: document.getElementById('fecha')?.textContent,
+                    ordenCompraNo: document.getElementById('ordenCompraNo')?.textContent,
+                    cotizacionNo: document.getElementById('cotizacionNo')?.textContent,
+                    requisicionNo: document.getElementById('requisicionNo')?.textContent,
+                    tipoCambio: document.getElementById('tipoCambio')?.textContent,
+                    headerRevDate: document.getElementById('headerRevDate')?.textContent,
+                    proveedorNombre: document.getElementById('proveedorNombre')?.textContent,
+                    proveedorDireccion1: document.getElementById('proveedorDireccion1')?.textContent,
+                    proveedorDireccion2: document.getElementById('proveedorDireccion2')?.textContent,
+                    proveedorRfc: document.getElementById('proveedorRfc')?.textContent,
+                    proveedorContacto: document.getElementById('proveedorContacto')?.textContent,
+                    entregaNombre: document.getElementById('entregaNombre')?.textContent,
+                    entregaDireccion1: document.getElementById('entregaDireccion1')?.textContent,
+                    entregaDireccion2: document.getElementById('entregaDireccion2')?.textContent,
+                    entregaRfc: document.getElementById('entregaRfc')?.textContent,
+                    entregaTel: document.getElementById('entregaTel')?.textContent,
+                    ivaPorcentaje: document.getElementById('ivaPorcentaje')?.value,
+                    solicitante: document.getElementById('solicitante')?.textContent,
+                    footerNota1: document.getElementById('footerNota1')?.textContent,
+                    footerNota2: document.getElementById('footerNota2')?.textContent,
+                    footerRevDate: document.getElementById('footerRevDate')?.textContent,
+                    items: []
+                };
+
+                itemsTableBody.querySelectorAll('.item-row').forEach(row => {
+                    data.items.push({
+                        partida: row.querySelector('.partida-numero')?.textContent,
+                        descripcion: row.querySelector('.item-descripcion')?.textContent,
+                        marca: row.querySelector('.item-marca')?.textContent,
+                        noParte: row.querySelector('.item-no-parte')?.textContent,
+                        cantidad: row.querySelector('.item-cantidad')?.textContent,
+                        precio: row.querySelector('.item-precio')?.textContent, 
+                        descuento: row.querySelector('.item-descuento')?.textContent,
+                    });
+                });
+                return data;
+            }
+
+            exportJsonButton.addEventListener('click', function() {
+                const data = gatherDataForJson();
+                const jsonData = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const ordenNo = document.getElementById('ordenCompraNo')?.textContent || 'datos';
+                a.download = `orden_de_compra_datos_${ordenNo}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showJsonMessage('Datos exportados a JSON exitosamente.');
+            });
+
+            importJsonInput.addEventListener('change', function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const importedData = JSON.parse(e.target.result);
+                            applyDataFromJson(importedData);
+                            showJsonMessage('Datos importados de JSON exitosamente.');
+                        } catch (error) {
+                            console.error("Error al parsear JSON:", error);
+                            showJsonMessage('Error al importar JSON: Formato inválido.', true);
+                        }
+                        event.target.value = null;
+                    };
+                    reader.onerror = function() {
+                        showJsonMessage('Error al leer el archivo.', true);
+                         event.target.value = null;
+                    };
+                    reader.readAsText(file);
+                }
+            });
+
+            function applyDataFromJson(data) {
+                const setText = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = value || '';
+                };
+                const setValue = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = value || '';
+                }
+
+                setText('empresaNombre', data.empresaNombre);
+                setText('empresaDireccion1', data.empresaDireccion1);
+                setText('empresaDireccion2', data.empresaDireccion2);
+                setText('empresaRfc', data.empresaRfc);
+                setText('empresaTel', data.empresaTel);
+                setText('fecha', data.fecha);
+                setText('ordenCompraNo', data.ordenCompraNo);
+                setText('cotizacionNo', data.cotizacionNo);
+                setText('requisicionNo', data.requisicionNo);
+                setText('tipoCambio', data.tipoCambio);
+                setText('headerRevDate', data.headerRevDate);
+                setText('proveedorNombre', data.proveedorNombre);
+                setText('proveedorDireccion1', data.proveedorDireccion1);
+                setText('proveedorDireccion2', data.proveedorDireccion2);
+                setText('proveedorRfc', data.proveedorRfc);
+                setText('proveedorContacto', data.proveedorContacto);
+                setText('entregaNombre', data.entregaNombre);
+                setText('entregaDireccion1', data.entregaDireccion1);
+                setText('entregaDireccion2', data.entregaDireccion2);
+                setText('entregaRfc', data.entregaRfc);
+                setText('entregaTel', data.entregaTel);
+                setValue('ivaPorcentaje', data.ivaPorcentaje || '16');
+                setText('solicitante', data.solicitante);
+                setText('footerNota1', data.footerNota1);
+                setText('footerNota2', data.footerNota2);
+                setText('footerRevDate', data.footerRevDate);
+
+                itemsTableBody.innerHTML = ''; 
+                if (data.items && Array.isArray(data.items)) {
+                    data.items.forEach(itemData => {
+                        const newRow = createItemRowElement({
+                            partida: itemData.partida,
+                            descripcion: itemData.descripcion,
+                            marca: itemData.marca,
+                            noParte: itemData.noParte,
+                            cantidad: itemData.cantidad,
+                            precio: itemData.precio, 
+                            descuento: itemData.descuento
+                        });
+                        itemsTableBody.appendChild(newRow);
+                    });
+                }
+                updatePartidaNumbers();
+                calculateGlobalTotals();
+            }
+
+            const A4_WIDTH_MM = 297;
+            const A4_HEIGHT_MM = 210;
+            const MARGIN_MM = 15; 
+            const CONTENT_WIDTH_MM = A4_WIDTH_MM - (2 * MARGIN_MM);
+            const CONTENT_HEIGHT_MM = A4_HEIGHT_MM - (2 * MARGIN_MM);
+            const MM_TO_PX_APPROX = 3.78; 
+
+            function getClonedRowHeight(itemRowNode, renderArea) {
+                const rowClone = itemRowNode.cloneNode(true);
+                const tempTable = document.createElement('table');
+                tempTable.style.width = '100%'; 
+                tempTable.classList.add('items-table'); 
+                
+                const tempTbody = document.createElement('tbody');
+                tempTable.appendChild(tempTbody);
+                tempTbody.appendChild(rowClone);
+                
+                renderArea.appendChild(tempTable);
+                const height = rowClone.offsetHeight;
+                renderArea.innerHTML = ''; 
+                return height;
+            }
+
+            async function exportToPdf() {
+                pdfProgress.style.display = 'block';
+                exportPdfButton.disabled = true;
+                exportJsonButton.disabled = true;
+
+                const allItemRowsOriginal = Array.from(itemsTableBody.querySelectorAll('.item-row'));
+                const allItemRows = allItemRowsOriginal.map(row => row.cloneNode(true)); 
+
+
+                if (allItemRows.length === 0) {
+                    showJsonMessage("No hay partidas para exportar a PDF.", true);
+                    pdfProgress.style.display = 'none';
+                    exportPdfButton.disabled = false;
+                    exportJsonButton.disabled = false;
+                    return;
+                }
+
+                const pdf = new jsPDF({
+                    orientation: 'landscape',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+
+                const pageStructureTemplate = purchaseOrderMasterContainer.cloneNode(true);
+                pageStructureTemplate.classList.remove('a4-landscape-preview');
+                pageStructureTemplate.classList.add('pdf-page-container'); 
+                pageStructureTemplate.querySelector('#itemsTableBody').innerHTML = ''; 
+                const templateTotalsSection = pageStructureTemplate.querySelector('#totalsSection');
+                if (templateTotalsSection) templateTotalsSection.style.display = 'none';
+                
+                pdfRenderArea.appendChild(pageStructureTemplate);
+
+                const headerHeightPx = pageStructureTemplate.querySelector('header')?.offsetHeight || 0;
+                const poTitleHeightPx = pageStructureTemplate.querySelector('.text-center.my-4')?.offsetHeight || 0;
+                const providerDeliveryHeightPx = pageStructureTemplate.querySelector('#providerDeliverySection')?.offsetHeight || 0;
+                const itemsTheadHeightPx = pageStructureTemplate.querySelector('.items-table thead')?.offsetHeight || 0;
+                const footerHeightPx = pageStructureTemplate.querySelector('#footerSection')?.offsetHeight || 0;
+                
+                let totalsHeightPx = 0;
+                if (templateTotalsSection) {
+                    templateTotalsSection.style.display = 'flex'; 
+                    totalsHeightPx = templateTotalsSection.offsetHeight || 0;
+                    templateTotalsSection.style.display = 'none'; 
+                }
+                
+                pdfRenderArea.innerHTML = ''; 
+
+                const fixedElementsHeightPx = headerHeightPx + poTitleHeightPx + providerDeliveryHeightPx + itemsTheadHeightPx + footerHeightPx;
+                const totalPageHeightPx = CONTENT_HEIGHT_MM * MM_TO_PX_APPROX; 
+                const bufferPx = 30; // Adjusted buffer
+                
+                const maxItemsTbodyHeight_Regular = totalPageHeightPx - fixedElementsHeightPx - bufferPx;
+                const maxItemsTbodyHeight_FinalWithTotals = totalPageHeightPx - (fixedElementsHeightPx + totalsHeightPx) - bufferPx;
+
+                let currentPageItemRows = [];
+                let currentPageItemsHeightPx = 0;
+                const pagesData = []; 
+
+                for (const row of allItemRows) { 
+                    const rowHeightPx = getClonedRowHeight(row, pdfRenderArea);
+
+                    if (currentPageItemsHeightPx + rowHeightPx > maxItemsTbodyHeight_Regular && currentPageItemRows.length > 0) {
+                        pagesData.push(currentPageItemRows);
+                        currentPageItemRows = [];
+                        currentPageItemsHeightPx = 0;
+                    }
+                    currentPageItemRows.push(row); 
+                    currentPageItemsHeightPx += rowHeightPx;
+                }
+                if (currentPageItemRows.length > 0) {
+                    pagesData.push(currentPageItemRows);
+                }
+
+                // Refined logic for splitting the last page items
+                if (pagesData.length > 0) {
+                    const lastChunkOfItems = pagesData.pop(); 
+                    
+                    let itemsForTheActualFinalPage = [];
+                    let itemsForAPrecedingPage = [];
+                    let accumulatedHeightOnFinal = 0;
+
+                    for (let j = lastChunkOfItems.length - 1; j >= 0; j--) {
+                        const itemRow = lastChunkOfItems[j];
+                        const itemHeight = getClonedRowHeight(itemRow, pdfRenderArea);
+
+                        if (accumulatedHeightOnFinal + itemHeight <= maxItemsTbodyHeight_FinalWithTotals) {
+                            itemsForTheActualFinalPage.unshift(itemRow); 
+                            accumulatedHeightOnFinal += itemHeight;
+                        } else {
+                            itemsForAPrecedingPage.unshift(itemRow); 
+                        }
+                    }
+
+                    if (itemsForAPrecedingPage.length > 0) {
+                        pagesData.push(itemsForAPrecedingPage); 
+                    }
+                    // Always push itemsForTheActualFinalPage, even if empty.
+                    // This ensures that if no items fit with totals, an "empty item" page is created for totals.
+                    pagesData.push(itemsForTheActualFinalPage);
+                }
+                
+                const finalTotalPages = pagesData.length > 0 ? pagesData.length : (allItemRows.length > 0 ? 1 : 0) ;
+
+                for (let i = 0; i < finalTotalPages; i++) {
+                    const pageItems = pagesData[i] || (finalTotalPages === 1 && allItemRows.length > 0 ? allItemRows : []); 
+                    const pageElement = purchaseOrderMasterContainer.cloneNode(true);
+                    pageElement.classList.remove('a4-landscape-preview');
+                    pageElement.classList.add('pdf-page-container');
+                    
+                    const pageItemsTableBody = pageElement.querySelector('#itemsTableBody');
+                    pageItemsTableBody.innerHTML = ''; 
+                    pageItems.forEach(itemRowNode => { 
+                        pageItemsTableBody.appendChild(itemRowNode.cloneNode(true)); 
+                    });
+
+                    const pageNumDisplay = pageElement.querySelector('#pageNumberDisplay');
+                    if (pageNumDisplay) pageNumDisplay.textContent = `Página ${i + 1} de ${finalTotalPages}`;
+                    
+                    const totalsSectionElPage = pageElement.querySelector('#totalsSection');
+                    const ivaPorcentajeInputElPage = pageElement.querySelector('#ivaPorcentaje');
+                    const printOnlyIvaElPage = pageElement.querySelector('.print-only-iva-percentage');
+
+                    if (i === finalTotalPages - 1) { 
+                        if (totalsSectionElPage) totalsSectionElPage.style.display = 'flex'; 
+                        pageElement.querySelector('#subtotal').textContent = document.getElementById('subtotal').textContent;
+                        pageElement.querySelector('#ivaMonto').textContent = document.getElementById('ivaMonto').textContent;
+                        pageElement.querySelector('#totalGeneral').textContent = document.getElementById('totalGeneral').textContent;
+                        if(printOnlyIvaElPage) printOnlyIvaElPage.textContent = ivaPorcentajeInput.value;
+                        if(ivaPorcentajeInputElPage) ivaPorcentajeInputElPage.style.display = 'none';
+                    } else {
+                        if (totalsSectionElPage) totalsSectionElPage.style.display = 'none'; 
+                        if(ivaPorcentajeInputElPage) ivaPorcentajeInputElPage.style.display = 'none';
+                        if(printOnlyIvaElPage) printOnlyIvaElPage.textContent = ivaPorcentajeInput.value; 
+                    }
+                    
+                    const addItemBtnInPage = pageElement.querySelector('#addItemButton');
+                    if(addItemBtnInPage) addItemBtnInPage.style.display = 'none';
+
+                    pdfRenderArea.appendChild(pageElement); 
+
+                    await html2canvas(pageElement, {
+                        scale: 2, 
+                        useCORS: true,
+                        logging: false, 
+                        width: pageElement.offsetWidth, 
+                        height: pageElement.offsetHeight, 
+                        windowWidth: pageElement.scrollWidth, 
+                        windowHeight: pageElement.scrollHeight,
+                        onclone: (documentClone) => {
+                            documentClone.querySelectorAll('[contenteditable="true"]').forEach(el => {
+                                el.style.outline = 'none';
+                                el.blur(); 
+                            });
+                            const ivaInputClone = documentClone.querySelector('#ivaPorcentaje');
+                            const ivaSpanClone = documentClone.querySelector('.print-only-iva-percentage');
+                            if(ivaInputClone) ivaInputClone.style.display = 'none';
+                            if(ivaSpanClone) ivaSpanClone.style.display = 'inline';
+                        }
+                    }).then(canvas => {
+                        const imgData = canvas.toDataURL('image/png');
+                        if (i > 0) {
+                            pdf.addPage('a4', 'landscape');
+                        }
+                        const canvasAspectRatio = canvas.width / canvas.height;
+                        const pdfContentAspectRatio = CONTENT_WIDTH_MM / CONTENT_HEIGHT_MM;
+                        let imgPdfWidth, imgPdfHeight;
+
+                        if (canvasAspectRatio > pdfContentAspectRatio) {
+                            imgPdfWidth = CONTENT_WIDTH_MM;
+                            imgPdfHeight = CONTENT_WIDTH_MM / canvasAspectRatio;
+                        } else {
+                            imgPdfHeight = CONTENT_HEIGHT_MM;
+                            imgPdfWidth = CONTENT_HEIGHT_MM * canvasAspectRatio;
+                        }
+                        const x = MARGIN_MM + (CONTENT_WIDTH_MM - imgPdfWidth) / 2;
+                        const y = MARGIN_MM + (CONTENT_HEIGHT_MM - imgPdfHeight) / 2;
+                        
+                        pdf.addImage(imgData, 'PNG', x, y, imgPdfWidth, imgPdfHeight);
+                    }).catch(err => {
+                        console.error("Error en html2canvas:", err);
+                        showJsonMessage('Error al generar imagen para PDF.', true);
+                    });
+                    pdfRenderArea.innerHTML = ''; 
+                }
+                
+                if (finalTotalPages > 0) {
+                    const fechaVal = document.getElementById('fecha').textContent.replace(/\//g, '-');
+                    const ordenNoVal = document.getElementById('ordenCompraNo').textContent;
+                    pdf.save(`OrdenDeCompra_${ordenNoVal}_${fechaVal}.pdf`);
+                    showJsonMessage('PDF exportado exitosamente.');
+                } else if (allItemRows.length > 0) { 
+                     console.error("Error en la paginación PDF: no se generaron páginas pero había partidas.");
+                     showJsonMessage('Error en la paginación del PDF.', true);
+                }
+
+                pdfProgress.style.display = 'none';
+                exportPdfButton.disabled = false; 
+                exportJsonButton.disabled = false;
+            }
+
+            exportPdfButton.addEventListener('click', exportToPdf);
+        });
+    </script>
+</body>
+</html>
